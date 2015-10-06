@@ -49,7 +49,7 @@ import java.util.NoSuchElementException;
  *
  * @author carlanton@google.com (Carl Haverl)
  */
-class LiteralByteString extends ByteString {
+class LiteralByteString extends ByteString.LeafByteString {
 
   private static final long serialVersionUID = 1L;
 
@@ -139,7 +139,7 @@ class LiteralByteString extends ByteString {
     return result;
  }
 
- @Override
+  @Override
   public void writeTo(OutputStream outputStream) throws IOException {
     outputStream.write(toByteArray());
   }
@@ -194,19 +194,16 @@ class LiteralByteString extends ByteString {
       LiteralByteString otherAsLiteral = (LiteralByteString) other;
       // If we know the hash codes and they are not equal, we know the byte
       // strings are not equal.
-      if (hash != 0
-          && otherAsLiteral.hash != 0
-          && hash != otherAsLiteral.hash) {
+      int thisHash = peekCachedHashCode();
+      int thatHash = otherAsLiteral.peekCachedHashCode();
+      if (thisHash != 0 && thatHash != 0 && thisHash != thatHash) {
         return false;
       }
 
       return equalsRange((LiteralByteString) other, 0, size());
-    } else if (other instanceof RopeByteString) {
-      return other.equals(this);
     } else {
-      throw new IllegalArgumentException(
-          "Has a new type of ByteString been created? Found "
-              + other.getClass());
+      // RopeByteString and NioByteString.
+      return other.equals(this);
     }
   }
 
@@ -219,7 +216,8 @@ class LiteralByteString extends ByteString {
    * @param length number of bytes to compare
    * @return true for equality of substrings, else false.
    */
-  boolean equalsRange(LiteralByteString other, int offset, int length) {
+  @Override
+  boolean equalsRange(ByteString other, int offset, int length) {
     if (length > other.size()) {
       throw new IllegalArgumentException(
           "Length too large: " + length + size());
@@ -230,50 +228,22 @@ class LiteralByteString extends ByteString {
               other.size());
     }
 
-    byte[] thisBytes = bytes;
-    byte[] otherBytes = other.bytes;
-    int thisLimit = getOffsetIntoBytes() + length;
-    for (int thisIndex = getOffsetIntoBytes(), otherIndex =
-        other.getOffsetIntoBytes() + offset;
-        (thisIndex < thisLimit); ++thisIndex, ++otherIndex) {
-      if (thisBytes[thisIndex] != otherBytes[otherIndex]) {
-        return false;
+    if (other instanceof LiteralByteString) {
+      LiteralByteString lbsOther = (LiteralByteString) other;
+      byte[] thisBytes = bytes;
+      byte[] otherBytes = lbsOther.bytes;
+      int thisLimit = getOffsetIntoBytes() + length;
+      for (int thisIndex = getOffsetIntoBytes(), otherIndex =
+           lbsOther.getOffsetIntoBytes() + offset;
+           (thisIndex < thisLimit); ++thisIndex, ++otherIndex) {
+        if (thisBytes[thisIndex] != otherBytes[otherIndex]) {
+          return false;
+        }
       }
+      return true;
     }
-    return true;
-  }
 
-  /**
-   * Cached hash value.  Intentionally accessed via a data race, which
-   * is safe because of the Java Memory Model's "no out-of-thin-air values"
-   * guarantees for ints.
-   */
-  private int hash = 0;
-
-  /**
-   * Compute the hashCode using the traditional algorithm from {@link
-   * ByteString}.
-   *
-   * @return hashCode value
-   */
-  @Override
-  public int hashCode() {
-    int h = hash;
-
-    if (h == 0) {
-      int size = size();
-      h = partialHash(size, 0, size);
-      if (h == 0) {
-        h = 1;
-      }
-      hash = h;
-    }
-    return h;
-  }
-
-  @Override
-  protected int peekCachedHashCode() {
-    return hash;
+    return other.substring(offset, offset + length).equals(substring(0, length));
   }
 
   @Override
@@ -326,15 +296,18 @@ class LiteralByteString extends ByteString {
       limit = size();
     }
 
+    @Override
     public boolean hasNext() {
       return (position < limit);
     }
 
+    @Override
     public Byte next() {
       // Boxing calls Byte.valueOf(byte), which does not instantiate.
       return nextByte();
     }
 
+    @Override
     public byte nextByte() {
       try {
         return bytes[position++];
@@ -343,6 +316,7 @@ class LiteralByteString extends ByteString {
       }
     }
 
+    @Override
     public void remove() {
       throw new UnsupportedOperationException();
     }

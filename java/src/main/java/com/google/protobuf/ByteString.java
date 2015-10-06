@@ -83,6 +83,13 @@ public abstract class ByteString implements Iterable<Byte>, Serializable {
    */
   public static final ByteString EMPTY = new LiteralByteString(new byte[0]);
 
+  /**
+   * Cached hash value. Intentionally accessed via a data race, which
+   * is safe because of the Java Memory Model's "no out-of-thin-air values"
+   * guarantees for ints. A value of 0 implies that the hash has not been set.
+   */
+  private int hash = 0;
+
   // This constructor is here to prevent subclassing outside of this package,
   ByteString() {}
 
@@ -105,6 +112,7 @@ public abstract class ByteString implements Iterable<Byte>, Serializable {
    *
    * @return the iterator
    */
+  @Override
   public abstract ByteIterator iterator();
 
   /**
@@ -295,7 +303,7 @@ public abstract class ByteString implements Iterable<Byte>, Serializable {
    * immutable tree of byte arrays ("chunks") of the stream data.  The
    * first chunk is small, with subsequent chunks each being double
    * the size, up to 8K.
-   * 
+   *
    * <p>Each byte read from the input stream will be copied twice to ensure
    * that the resulting ByteString is truly immutable.
    *
@@ -716,13 +724,41 @@ public abstract class ByteString implements Iterable<Byte>, Serializable {
   public abstract boolean equals(Object o);
 
   /**
-   * Return a non-zero hashCode depending only on the sequence of bytes
-   * in this ByteString.
+   * Base class for leaf {@link ByteString}s (i.e. non-ropes).
+   */
+  abstract static class LeafByteString extends ByteString {
+    /**
+     * Check equality of the substring of given length of this object starting at
+     * zero with another {@code ByteString} substring starting at offset.
+     *
+     * @param other  what to compare a substring in
+     * @param offset offset into other
+     * @param length number of bytes to compare
+     * @return true for equality of substrings, else false.
+     */
+    abstract boolean equalsRange(ByteString other, int offset, int length);
+  }
+
+  /**
+   * Compute the hashCode using the traditional algorithm from {@link
+   * ByteString}.
    *
-   * @return hashCode value for this object
+   * @return hashCode value
    */
   @Override
-  public abstract int hashCode();
+  public final int hashCode() {
+    int h = hash;
+
+    if (h == 0) {
+      int size = size();
+      h = partialHash(size, 0, size);
+      if (h == 0) {
+        h = 1;
+      }
+      hash = h;
+    }
+    return h;
+  }
 
   // =================================================================
   // Input stream
@@ -1034,7 +1070,9 @@ public abstract class ByteString implements Iterable<Byte>, Serializable {
    *
    * @return value of cached hash code or 0 if not computed yet
    */
-  protected abstract int peekCachedHashCode();
+  protected final int peekCachedHashCode() {
+    return hash;
+  }
 
   /**
    * Compute the hash across the value bytes starting with the given hash, and

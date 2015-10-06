@@ -391,7 +391,7 @@ class RopeByteString extends ByteString {
     List<ByteBuffer> result = new ArrayList<ByteBuffer>();
     PieceIterator pieces = new PieceIterator(this);
     while (pieces.hasNext()) {
-      LiteralByteString byteString = pieces.next();
+      LeafByteString byteString = pieces.next();
       result.add(byteString.asReadOnlyByteBuffer());
     }
     return result;
@@ -471,11 +471,10 @@ class RopeByteString extends ByteString {
     // hashCode if it's already computed.  It's arguable we should compute the
     // hashCode here, and if we're going to be testing a bunch of byteStrings,
     // it might even make sense.
-    if (hash != 0) {
-      int cachedOtherHash = otherByteString.peekCachedHashCode();
-      if (cachedOtherHash != 0 && hash != cachedOtherHash) {
-        return false;
-      }
+    int thisHash = peekCachedHashCode();
+    int thatHash = otherByteString.peekCachedHashCode();
+    if (thisHash != 0 && thatHash != 0 && thisHash != thatHash) {
+      return false;
     }
 
     return equalsFragments(otherByteString);
@@ -492,12 +491,12 @@ class RopeByteString extends ByteString {
    */
   private boolean equalsFragments(ByteString other) {
     int thisOffset = 0;
-    Iterator<LiteralByteString> thisIter = new PieceIterator(this);
-    LiteralByteString thisString = thisIter.next();
+    Iterator<LeafByteString> thisIter = new PieceIterator(this);
+    LeafByteString thisString = thisIter.next();
 
     int thatOffset = 0;
-    Iterator<LiteralByteString> thatIter = new PieceIterator(other);
-    LiteralByteString thatString = thatIter.next();
+    Iterator<LeafByteString> thatIter = new PieceIterator(other);
+    LeafByteString thatString = thatIter.next();
 
     int pos = 0;
     while (true) {
@@ -534,33 +533,6 @@ class RopeByteString extends ByteString {
         thatOffset += bytesToCompare;
       }
     }
-  }
-
-  /**
-   * Cached hash value.  Intentionally accessed via a data race, which is safe
-   * because of the Java Memory Model's "no out-of-thin-air values" guarantees
-   * for ints.
-   */
-  private int hash = 0;
-
-  @Override
-  public int hashCode() {
-    int h = hash;
-
-    if (h == 0) {
-      h = totalLength;
-      h = partialHash(h, 0, totalLength);
-      if (h == 0) {
-        h = 1;
-      }
-      hash = h;
-    }
-    return h;
-  }
-
-  @Override
-  protected int peekCachedHashCode() {
-    return hash;
   }
 
   @Override
@@ -714,34 +686,34 @@ class RopeByteString extends ByteString {
    * <p>This iterator is used to implement
    * {@link RopeByteString#equalsFragments(ByteString)}.
    */
-  private static class PieceIterator implements Iterator<LiteralByteString> {
+  private static class PieceIterator implements Iterator<LeafByteString> {
 
     private final Stack<RopeByteString> breadCrumbs =
-        new Stack<RopeByteString>();
-    private LiteralByteString next;
+            new Stack<RopeByteString>();
+    private LeafByteString next;
 
     private PieceIterator(ByteString root) {
       next = getLeafByLeft(root);
     }
 
-    private LiteralByteString getLeafByLeft(ByteString root) {
+    private LeafByteString getLeafByLeft(ByteString root) {
       ByteString pos = root;
       while (pos instanceof RopeByteString) {
         RopeByteString rbs = (RopeByteString) pos;
         breadCrumbs.push(rbs);
         pos = rbs.left;
       }
-      return (LiteralByteString) pos;
+      return (LeafByteString) pos;
     }
 
-    private LiteralByteString getNextNonEmptyLeaf() {
+    private LeafByteString getNextNonEmptyLeaf() {
       while (true) {
         // Almost always, we go through this loop exactly once.  However, if
         // we discover an empty string in the rope, we toss it and try again.
         if (breadCrumbs.isEmpty()) {
           return null;
         } else {
-          LiteralByteString result = getLeafByLeft(breadCrumbs.pop().right);
+          LeafByteString result = getLeafByLeft(breadCrumbs.pop().right);
           if (!result.isEmpty()) {
             return result;
           }
@@ -749,6 +721,7 @@ class RopeByteString extends ByteString {
       }
     }
 
+    @Override
     public boolean hasNext() {
       return next != null;
     }
@@ -758,15 +731,17 @@ class RopeByteString extends ByteString {
      *
      * @return next non-empty LiteralByteString or {@code null}
      */
-    public LiteralByteString next() {
+    @Override
+    public LeafByteString next() {
       if (next == null) {
         throw new NoSuchElementException();
       }
-      LiteralByteString result = next;
+      LeafByteString result = next;
       next = getNextNonEmptyLeaf();
       return result;
     }
 
+    @Override
     public void remove() {
       throw new UnsupportedOperationException();
     }
@@ -781,7 +756,7 @@ class RopeByteString extends ByteString {
     return new LiteralByteString(toByteArray());
   }
 
-  private void readObject(ObjectInputStream in) throws IOException {
+  private void readObject(@SuppressWarnings("unused") ObjectInputStream in) throws IOException {
     throw new InvalidObjectException(
         "RopeByteStream instances are not to be serialized directly");
   }
@@ -806,14 +781,17 @@ class RopeByteString extends ByteString {
       bytesRemaining = size();
     }
 
+    @Override
     public boolean hasNext() {
       return (bytesRemaining > 0);
     }
 
+    @Override
     public Byte next() {
       return nextByte(); // Does not instantiate a Byte
     }
 
+    @Override
     public byte nextByte() {
       if (!bytes.hasNext()) {
         bytes = pieces.next().iterator();
@@ -822,6 +800,7 @@ class RopeByteString extends ByteString {
       return bytes.nextByte();
     }
 
+    @Override
     public void remove() {
       throw new UnsupportedOperationException();
     }
@@ -835,7 +814,7 @@ class RopeByteString extends ByteString {
     // Iterates through the pieces of the rope
     private PieceIterator pieceIterator;
     // The current piece
-    private LiteralByteString currentPiece;
+    private LeafByteString currentPiece;
     // The size of the current piece
     private int currentPieceSize;
     // The index of the next byte to read in the current piece
@@ -872,7 +851,7 @@ class RopeByteString extends ByteString {
     /**
      * Internal implementation of read and skip.  If b != null, then read the
      * next {@code length} bytes into the buffer {@code b} at
-     * offset {@code offset}.  If b == null, then skip the next {@code length)
+     * offset {@code offset}.  If b == null, then skip the next {@code length}
      * bytes.
      * <p>
      * This method assumes that all error checking has already happened.

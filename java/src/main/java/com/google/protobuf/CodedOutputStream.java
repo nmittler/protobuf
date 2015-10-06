@@ -53,7 +53,7 @@ import java.util.logging.Logger;
  * @author kneton@google.com Kenton Varda
  */
 public final class CodedOutputStream {
-  
+
   private static final Logger logger = Logger.getLogger(CodedOutputStream.class.getName());
 
   // TODO(dweis): Consider migrating to a ByteBuffer.
@@ -428,7 +428,7 @@ public final class CodedOutputStream {
     try {
       efficientWriteStringNoTag(value);
     } catch (UnpairedSurrogateException e) {
-      logger.log(Level.WARNING, 
+      logger.log(Level.WARNING,
           "Converting ill-formed UTF-16. Your Protocol Buffer will not round trip correctly!", e);
       inefficientWriteStringNoTag(value);
     }
@@ -449,10 +449,10 @@ public final class CodedOutputStream {
    * Write a {@code string} field to the stream efficiently. If the {@code string} is malformed,
    * this method rolls back its changes and throws an {@link UnpairedSurrogateException} with the
    * intent that the caller will catch and retry with {@link #inefficientWriteStringNoTag(String)}.
-   * 
+   *
    * @param value the string to write to the stream
-   * 
-   * @throws UnpairedSurrogateException when {@code value} is ill-formed UTF-16. 
+   *
+   * @throws UnpairedSurrogateException when {@code value} is ill-formed UTF-16.
    */
   private void efficientWriteStringNoTag(final String value) throws IOException {
     // UTF-8 byte length of the string is at least its UTF-16 code unit length (value.length()),
